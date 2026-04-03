@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #FF6B6B;
+  --color-primary-dark: #EE5A5A;
+  --color-secondary: #4ECDC4;
+  --color-secondary-dark: #3DBDB5;
+  --color-dark: #0A0E17;
+  --color-dark-light: #1A1F2E;
+  --color-dark-lighter: #2A3142;
+  --color-accent-red: #EE5A5A;
+  --color-accent-purple: #9B59B6;
+  --color-accent-blue: #3498DB;
+  --color-accent-green: #2ECC71;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  body {
+    background-color: var(--color-dark);
+    color: white;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+  
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .gradient-text {
+    background: linear-gradient(to right, var(--color-primary), var(--color-accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .btn-primary {
+    background: linear-gradient(to right, var(--color-primary), var(--color-accent-purple));
+    color: white;
+    font-weight: 600;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    transition: all 0.2s;
+  }
+  
+  .btn-primary:hover {
+    opacity: 0.9;
+  }
+  
+  .btn-primary:active {
+    transform: scale(0.95);
+  }
+  
+  .btn-secondary {
+    background-color: var(--color-dark-lighter);
+    color: white;
+    font-weight: 500;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    transition: all 0.2s;
+  }
+  
+  .btn-secondary:hover {
+    background-color: var(--color-dark-light);
+  }
+  
+  .btn-secondary:active {
+    transform: scale(0.95);
+  }
+  
+  .card {
+    background-color: var(--color-dark-light);
+    border-radius: 1rem;
+    padding: 1rem;
+  }
+  
+  .input {
+    background-color: var(--color-dark-lighter);
+    border: 1px solid var(--color-dark-lighter);
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    color: white;
+    transition: border-color 0.2s;
+  }
+  
+  .input::placeholder {
+    color: #6b7280;
+  }
+  
+  .input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0A0E17;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2A3142;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3A4156;
+}
+
+/* Animation for modal */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
