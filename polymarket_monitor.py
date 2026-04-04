@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Polymarket 自动追踪与 Telegram 通知系统 - 修复版
-每4小时自动扫描，发送跟单建议到 Telegram
+使用真正活跃的交易者地址
 """
 
 import json
@@ -17,42 +17,47 @@ from collections import defaultdict
 TELEGRAM_BOT_TOKEN = "8516202745:AAHcaLhbprHBws8TUBzMwSm3s1yKaCdVoQI"
 TELEGRAM_CHAT_ID = "8185893461"
 
-# 目标追踪地址
+# 真正活跃的目标地址（高ROI + 近期活跃）
 TARGET_ADDRESSES = [
-    {
-        "address": "0x6a72f61820b26b1fe4d956e17b6dc2a1ea3033ee",
-        "name": "kch123",
-        "strategy": "量化套利型",
-        "weight": 1.0,
-        "total_pnl": 11525073
-    },
-    {
-        "address": "0xefbc5fec8d7b0acdc8911bdd9a98d6964308f9a2",
-        "name": "reachingthesky",
-        "strategy": "趋势跟踪型",
-        "weight": 1.2,
-        "total_pnl": 3742635
-    },
-    {
-        "address": "0x019782cab5d844f02bafb71f512758be78579f3c",
-        "name": "majorexploiter",
-        "strategy": "价值投资型",
-        "weight": 1.2,
-        "total_pnl": 3668541
-    },
     {
         "address": "0xc2e7800b5af46e6093872b177b7a5e7f0563be51",
         "name": "beachboy4",
-        "strategy": "趋势跟踪型",
-        "weight": 1.0,
-        "total_pnl": 4040442
+        "strategy": "高频精准型",
+        "total_pnl": 3829987,
+        "month_pnl": 3652163,
+        "month_roi": 155.8
     },
     {
-        "address": "0xdc876e6873772d38716fda7f2452a78d426d7ab6",
-        "name": "432614799197",
+        "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
+        "name": "RN1",
         "strategy": "量化套利型",
-        "weight": 1.0,
-        "total_pnl": 4526176
+        "total_pnl": 6802572,
+        "month_pnl": 1543598,
+        "month_roi": 14.0
+    },
+    {
+        "address": "0xee613b3fc183ee44f9da9c05f53e2da107e3debf",
+        "name": "sovereign2013",
+        "strategy": "趋势跟踪型",
+        "total_pnl": 3353884,
+        "month_pnl": 1649803,
+        "month_roi": 13.0
+    },
+    {
+        "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
+        "name": "swisstony",
+        "strategy": "价值投资型",
+        "total_pnl": 5699512,
+        "month_pnl": 1050771,
+        "month_roi": 16.6
+    },
+    {
+        "address": "0x507e52ef684ca2dd91f90a9d26d149dd3288beae",
+        "name": "GamblingIsAllYouNeed",
+        "strategy": "量化套利型",
+        "total_pnl": 4659546,
+        "month_pnl": 843314,
+        "month_roi": 13.2
     }
 ]
 
@@ -94,12 +99,12 @@ class PolymarketMonitor:
         self.notifier = TelegramNotifier(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
     
     def get_trader_activity(self, address: str, name: str) -> List[Dict]:
-        """获取交易者最近活动 - 使用正确的 API 端点"""
+        """获取交易者最近活动"""
         url = f"{self.api_base}/activity"
         params = {
             "user": address,
             "limit": 50,
-            "type": "TRADE"  # 只获取交易
+            "type": "TRADE"
         }
         
         try:
@@ -118,14 +123,12 @@ class PolymarketMonitor:
                 ts = item.get('timestamp')
                 if ts:
                     try:
-                        # 时间戳是 Unix timestamp (秒)
                         activity_time = datetime.fromtimestamp(ts)
                         if activity_time > cutoff:
                             activities.append({
                                 'trader': name,
                                 'trader_address': address,
-                                'action': item.get('type'),  # TRADE
-                                'side': item.get('side'),  # BUY/SELL
+                                'side': item.get('side'),
                                 'market': item.get('title', 'Unknown'),
                                 'market_slug': item.get('slug', ''),
                                 'event_slug': item.get('eventSlug', ''),
@@ -137,7 +140,6 @@ class PolymarketMonitor:
                                 'condition_id': item.get('conditionId', '')
                             })
                     except Exception as e:
-                        print(f"  解析时间错误: {e}")
                         pass
             
             return activities
@@ -147,7 +149,6 @@ class PolymarketMonitor:
     
     def analyze_signals(self, all_activities: List[Dict]) -> List[Dict]:
         """分析交易信号 - 寻找共识"""
-        # 按市场分组
         market_trades = defaultdict(list)
         
         for act in all_activities:
@@ -158,8 +159,7 @@ class PolymarketMonitor:
         signals = []
         
         for (event_slug, outcome), trades in market_trades.items():
-            if len(trades) >= 2:  # 至少2个不同地址交易
-                # 检查是否是不同交易者
+            if len(trades) >= 2:
                 unique_traders = set(t['trader'] for t in trades)
                 if len(unique_traders) >= 2:
                     total_amount = sum(t['amount'] for t in trades)
@@ -167,7 +167,6 @@ class PolymarketMonitor:
                         'event': event_slug,
                         'market': trades[0]['market'],
                         'outcome': outcome,
-                        'direction': 'YES' if outcome in ['Yes', 'YES'] else outcome,
                         'traders': list(unique_traders),
                         'trade_count': len(trades),
                         'total_amount': round(total_amount, 2),
@@ -175,7 +174,6 @@ class PolymarketMonitor:
                         'url': f"https://polymarket.com/event/{event_slug}"
                     })
         
-        # 按交易金额排序
         signals.sort(key=lambda x: x['total_amount'], reverse=True)
         return signals
     
@@ -193,7 +191,7 @@ class PolymarketMonitor:
         for name, data in sorted(summary.items(), key=lambda x: x[1]['amount'], reverse=True):
             trader_info = next((t for t in TARGET_ADDRESSES if t['name'] == name), None)
             if trader_info:
-                lines.append(f"• {name}: {data['count']}笔交易, ${data['amount']:.0f} | {trader_info['strategy']}")
+                lines.append(f"• {name}: {data['count']}笔, ${data['amount']:.0f} | 月ROI {trader_info['month_roi']:.1f}%")
         
         return '\n'.join(lines) if lines else "暂无交易活动"
     
@@ -201,7 +199,6 @@ class PolymarketMonitor:
         """执行监控"""
         print(f"🦞 Polymarket 监控启动 - {datetime.now()}")
         
-        # 收集所有活动
         all_activities = []
         for target in TARGET_ADDRESSES:
             print(f"  扫描 {target['name']}...")
@@ -213,14 +210,11 @@ class PolymarketMonitor:
         
         print(f"  总计: {len(all_activities)} 笔交易")
         
-        # 分析信号
         signals = self.analyze_signals(all_activities)
         print(f"  发现 {len(signals)} 个共识信号")
         
-        # 生成交易者摘要
         trader_summary = self.generate_trader_summary(all_activities)
         
-        # 构建消息
         if signals:
             signal_text = ""
             for i, sig in enumerate(signals[:5], 1):
@@ -267,14 +261,12 @@ class PolymarketMonitor:
 <i>下次扫描: 4小时后</i>
 """
         
-        # 发送通知
         success = self.notifier.send_message(message)
         if success:
             print("  ✅ Telegram 通知已发送")
         else:
             print("  ❌ Telegram 通知发送失败")
         
-        # 保存日志
         log_entry = {
             'timestamp': datetime.now().isoformat(),
             'activities': len(all_activities),
@@ -289,7 +281,6 @@ class PolymarketMonitor:
 
 
 def main():
-    """主函数"""
     monitor = PolymarketMonitor()
     monitor.run()
 
