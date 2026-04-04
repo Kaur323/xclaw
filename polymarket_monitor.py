@@ -218,13 +218,15 @@ class PolymarketMonitor:
         if signals:
             signal_text = ""
             for i, sig in enumerate(signals[:5], 1):
+                # 构建事件链接
+                event_url = sig['url']
                 signal_text += f"""
 {i}. <b>{sig['market'][:50]}</b>
-   结果: {sig['outcome']}
-   交易者: {', '.join(sig['traders'])}
-   金额: ${sig['total_amount']} ({sig['trade_count']}笔)
-   均价: {sig['avg_price']}
-   🔗 <a href='{sig['url']}'>查看事件</a>
+   📈 结果: {sig['outcome']}
+   👥 交易者: {', '.join(sig['traders'])}
+   💰 金额: ${sig['total_amount']} ({sig['trade_count']}笔)
+   💵 均价: {sig['avg_price']}
+   🔗 <a href="{event_url}">👉 点击打开事件页面</a>
 """
             
             message = f"""
@@ -241,6 +243,8 @@ class PolymarketMonitor:
 • 过往业绩不代表未来
 • 建议小额测试
 • 设置止损 -15%
+
+<i>💡 提示：点击"👉 点击打开事件页面"可直接跳转到 Polymarket</i>
 """
         else:
             message = f"""
