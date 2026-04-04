@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Polymarket 自动追踪与 Telegram 通知系统
+Polymarket 自动追踪与 Telegram 通知系统 - 修复版
 每4小时自动扫描，发送跟单建议到 Telegram
 """
 
@@ -15,7 +15,7 @@ from collections import defaultdict
 
 # Telegram 配置
 TELEGRAM_BOT_TOKEN = "8516202745:AAHcaLhbprHBws8TUBzMwSm3s1yKaCdVoQI"
-TELEGRAM_CHAT_ID = "8185893461"  # 你的 Chat ID
+TELEGRAM_CHAT_ID = "8185893461"
 
 # 目标追踪地址
 TARGET_ADDRESSES = [
@@ -80,58 +80,6 @@ class TelegramNotifier:
         except Exception as e:
             print(f"发送 Telegram 消息失败: {e}")
             return False
-    
-    def send_signal_alert(self, signals: List[Dict], analysis: str):
-        """发送交易信号警报"""
-        if not signals:
-            message = f"""
-🦞 <b>Polymarket 监控报告</b>
-⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-📊 <b>扫描结果</b>
-• 监控地址: 5 个
-• 新信号: 0 个
-• 状态: 持续监控中
-
-💡 <b>建议</b>
-暂无明确跟单机会，继续监控...
-
-📈 <b>目标地址状态</b>
-{analysis}
-
-<i>下次扫描: 4小时后</i>
-"""
-        else:
-            signal_text = ""
-            for i, sig in enumerate(signals[:3], 1):
-                signal_text += f"""
-{i}. <b>{sig['market'][:40]}...</b>
-   方向: {'🟢 看多' if sig['direction'] == 'YES' else '🔴 看空'}
-   置信度: {sig['confidence']}%
-   支持: {', '.join(sig['supporting'])}
-   仓位: {sig['allocation']}
-   🔗 <a href='{sig['url']}'>查看事件</a>
-"""
-            
-            message = f"""
-🚨 <b>Polymarket 跟单信号</b>
-⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-📊 <b>发现 {len(signals)} 个交易机会</b>
-{signal_text}
-
-📈 <b>地址分析</b>
-{analysis}
-
-⚠️ <b>风险提示</b>
-• 过往业绩不代表未来
-• 建议小额测试
-• 设置止损 -15%
-
-<i>自动扫描每4小时执行</i>
-"""
-        
-        return self.send_message(message)
 
 
 class PolymarketMonitor:
@@ -142,16 +90,22 @@ class PolymarketMonitor:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
-        self.api_base = "https://data-api.polymarket.com/v1"
+        self.api_base = "https://data-api.polymarket.com"
         self.notifier = TelegramNotifier(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
     
     def get_trader_activity(self, address: str, name: str) -> List[Dict]:
-        """获取交易者最近活动"""
-        url = f"{self.api_base}/activity/{address}"
+        """获取交易者最近活动 - 使用正确的 API 端点"""
+        url = f"{self.api_base}/activity"
+        params = {
+            "user": address,
+            "limit": 50,
+            "type": "TRADE"  # 只获取交易
+        }
         
         try:
-            response = self.session.get(url, params={"limit": 20}, timeout=30)
+            response = self.session.get(url, params=params, timeout=30)
             if response.status_code != 200:
+                print(f"  {name} API 错误: {response.status_code}")
                 return []
             
             data = response.json()
@@ -160,23 +114,30 @@ class PolymarketMonitor:
             # 只取最近4小时的活动
             cutoff = datetime.now() - timedelta(hours=4)
             
-            for item in data.get('activities', []):
-                ts = item.get('timestamp', '')
+            for item in data:
+                ts = item.get('timestamp')
                 if ts:
                     try:
-                        activity_time = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        # 时间戳是 Unix timestamp (秒)
+                        activity_time = datetime.fromtimestamp(ts)
                         if activity_time > cutoff:
                             activities.append({
                                 'trader': name,
-                                'action': item.get('action'),
-                                'market': item.get('marketTitle'),
-                                'market_id': item.get('marketId'),
-                                'outcome': item.get('outcome'),
-                                'amount': float(item.get('amount', 0)),
+                                'trader_address': address,
+                                'action': item.get('type'),  # TRADE
+                                'side': item.get('side'),  # BUY/SELL
+                                'market': item.get('title', 'Unknown'),
+                                'market_slug': item.get('slug', ''),
+                                'event_slug': item.get('eventSlug', ''),
+                                'outcome': item.get('outcome', ''),
+                                'amount': float(item.get('usdcSize', 0)),
+                                'size': float(item.get('size', 0)),
                                 'price': float(item.get('price', 0)),
-                                'time': ts
+                                'time': activity_time.strftime('%H:%M'),
+                                'condition_id': item.get('conditionId', '')
                             })
-                    except:
+                    except Exception as e:
+                        print(f"  解析时间错误: {e}")
                         pass
             
             return activities
@@ -185,61 +146,56 @@ class PolymarketMonitor:
             return []
     
     def analyze_signals(self, all_activities: List[Dict]) -> List[Dict]:
-        """分析交易信号"""
+        """分析交易信号 - 寻找共识"""
         # 按市场分组
-        market_votes = defaultdict(lambda: {'YES': [], 'NO': []})
+        market_trades = defaultdict(list)
         
         for act in all_activities:
-            if act['action'] == 'BUY' and act['market_id']:
-                market_votes[act['market_id']]['outcome'] = act['outcome']
-                market_votes[act['market_id']]['traders'].append(act['trader'])
-                market_votes[act['market_id']]['market'] = act['market']
+            if act['side'] == 'BUY' and act['condition_id']:
+                key = (act['event_slug'], act['outcome'])
+                market_trades[key].append(act)
         
         signals = []
         
-        for market_id, data in market_votes.items():
-            yes_count = len(data.get('YES', []))
-            no_count = len(data.get('NO', []))
-            total = yes_count + no_count
-            
-            if total >= 2:  # 至少2个地址参与
-                if yes_count >= 2 and yes_count > no_count:
-                    confidence = (yes_count / total) * 100
+        for (event_slug, outcome), trades in market_trades.items():
+            if len(trades) >= 2:  # 至少2个不同地址交易
+                # 检查是否是不同交易者
+                unique_traders = set(t['trader'] for t in trades)
+                if len(unique_traders) >= 2:
+                    total_amount = sum(t['amount'] for t in trades)
                     signals.append({
-                        'market': data.get('market', market_id),
-                        'market_id': market_id,
-                        'direction': 'YES',
-                        'confidence': round(confidence, 1),
-                        'supporting': data.get('YES', []),
-                        'opposing': data.get('NO', []),
-                        'allocation': '20-25%' if confidence >= 75 else '10-15%',
-                        'url': f'https://polymarket.com/event/{market_id}'
-                    })
-                elif no_count >= 2 and no_count > yes_count:
-                    confidence = (no_count / total) * 100
-                    signals.append({
-                        'market': data.get('market', market_id),
-                        'market_id': market_id,
-                        'direction': 'NO',
-                        'confidence': round(confidence, 1),
-                        'supporting': data.get('NO', []),
-                        'opposing': data.get('YES', []),
-                        'allocation': '20-25%' if confidence >= 75 else '10-15%',
-                        'url': f'https://polymarket.com/event/{market_id}'
+                        'event': event_slug,
+                        'market': trades[0]['market'],
+                        'outcome': outcome,
+                        'direction': 'YES' if outcome in ['Yes', 'YES'] else outcome,
+                        'traders': list(unique_traders),
+                        'trade_count': len(trades),
+                        'total_amount': round(total_amount, 2),
+                        'avg_price': round(sum(t['price'] for t in trades) / len(trades), 3),
+                        'url': f"https://polymarket.com/event/{event_slug}"
                     })
         
-        # 按置信度排序
-        signals.sort(key=lambda x: x['confidence'], reverse=True)
+        # 按交易金额排序
+        signals.sort(key=lambda x: x['total_amount'], reverse=True)
         return signals
     
-    def generate_analysis(self) -> str:
-        """生成地址分析报告"""
-        analysis = []
-        for trader in TARGET_ADDRESSES:
-            analysis.append(
-                f"• {trader['name']}: ${trader['total_pnl']:,} | {trader['strategy']}"
-            )
-        return '\n'.join(analysis)
+    def generate_trader_summary(self, all_activities: List[Dict]) -> str:
+        """生成交易者摘要"""
+        summary = {}
+        for act in all_activities:
+            name = act['trader']
+            if name not in summary:
+                summary[name] = {'count': 0, 'amount': 0}
+            summary[name]['count'] += 1
+            summary[name]['amount'] += act['amount']
+        
+        lines = []
+        for name, data in sorted(summary.items(), key=lambda x: x[1]['amount'], reverse=True):
+            trader_info = next((t for t in TARGET_ADDRESSES if t['name'] == name), None)
+            if trader_info:
+                lines.append(f"• {name}: {data['count']}笔交易, ${data['amount']:.0f} | {trader_info['strategy']}")
+        
+        return '\n'.join(lines) if lines else "暂无交易活动"
     
     def run(self):
         """执行监控"""
@@ -251,19 +207,68 @@ class PolymarketMonitor:
             print(f"  扫描 {target['name']}...")
             activities = self.get_trader_activity(target['address'], target['name'])
             all_activities.extend(activities)
+            if activities:
+                print(f"    找到 {len(activities)} 笔近期交易")
             time.sleep(0.5)
         
-        print(f"  获取到 {len(all_activities)} 条近期活动")
+        print(f"  总计: {len(all_activities)} 笔交易")
         
         # 分析信号
         signals = self.analyze_signals(all_activities)
-        print(f"  发现 {len(signals)} 个信号")
+        print(f"  发现 {len(signals)} 个共识信号")
         
-        # 生成分析
-        analysis = self.generate_analysis()
+        # 生成交易者摘要
+        trader_summary = self.generate_trader_summary(all_activities)
+        
+        # 构建消息
+        if signals:
+            signal_text = ""
+            for i, sig in enumerate(signals[:5], 1):
+                signal_text += f"""
+{i}. <b>{sig['market'][:50]}</b>
+   结果: {sig['outcome']}
+   交易者: {', '.join(sig['traders'])}
+   金额: ${sig['total_amount']} ({sig['trade_count']}笔)
+   均价: {sig['avg_price']}
+   🔗 <a href='{sig['url']}'>查看事件</a>
+"""
+            
+            message = f"""
+🚨 <b>Polymarket 交易信号</b>
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+
+📊 <b>发现 {len(signals)} 个共识交易</b>
+{signal_text}
+
+👤 <b>交易者活动</b>
+{trader_summary}
+
+⚠️ <b>风险提示</b>
+• 过往业绩不代表未来
+• 建议小额测试
+• 设置止损 -15%
+"""
+        else:
+            message = f"""
+🦞 <b>Polymarket 监控报告</b>
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+
+📊 <b>扫描结果</b>
+• 监控地址: 5 个顶级交易者
+• 近期交易: {len(all_activities)} 笔
+• 共识信号: 0 个
+
+👤 <b>交易者活动</b>
+{trader_summary}
+
+💡 <b>状态</b>
+暂无明确跟单机会，继续监控中...
+
+<i>下次扫描: 4小时后</i>
+"""
         
         # 发送通知
-        success = self.notifier.send_signal_alert(signals, analysis)
+        success = self.notifier.send_message(message)
         if success:
             print("  ✅ Telegram 通知已发送")
         else:
@@ -281,7 +286,6 @@ class PolymarketMonitor:
             f.write(json.dumps(log_entry) + '\n')
         
         print(f"  💾 日志已保存")
-        print(f"  ⏰ 下次扫描: {(datetime.now() + timedelta(hours=4)).strftime('%H:%M')}")
 
 
 def main():
